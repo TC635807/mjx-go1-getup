@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Shared helpers used by the evaluation / probing scripts.
 
-\`load_policy\` loads a brax PPO policy either from a pickled params file
-(\`policies/*.pkl\`) or from an orbax checkpoint directory
-(\`logs/*/checkpoints/<step>\`). Network sizes and observation dimensions are
+`load_policy` loads a brax PPO policy either from a pickled params file
+(`policies/*.pkl`) or from an orbax checkpoint directory
+(`logs/*/checkpoints/<step>`). Network sizes and observation dimensions are
 inferred from the parameter shapes, so it works for both the walk and the
 get-up policies without extra configuration.
 """

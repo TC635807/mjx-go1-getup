@@ -1,0 +1,88 @@
+<mujoco model="go1 terrain scene">
+  <!-- Go1 训练/可视化地形场景 (凹凸起伏 + 阶梯地形)。
+       当前档 (2026-09-14 加大): 起伏 0.05m + 0.06m 台阶/5 级阶梯, 总高差 0.30m。
+
+       与 scene_mjx_position.xml (平地) 的唯一差别:
+         - worldbody 的 floor 从 `plane` 换成 `hfield` (引 assets/terrain.png)
+         - 加 rocky 贴图材质 (纯视觉)
+
+       关键约束 (改这里时必须保持):
+       1. **geom 名必须仍是 "floor"**: go1_mjx_position.xml 的 sensor 段有
+          `{FR,FL,RR,RL}_floor_found` (geom2="floor"), 改名会让四个足端接触
+          传感器全断 -> feet_air_time / feet_slip / 奖励全废。
+       2. **size 与 geom pos.z 必须成套标定**: 见下面 hfield 与 geom 两处注释。
+          换地形 (重跑 gen_terrain.py) 后 elevation_z 会变, 必须复测 pos.z
+          (方法: 扫描 pos.z 使 home 沉降高度与平地一致; 见 geom 注释)。
+       3. **floor 的 priority 必须为 0** (与平地场景一致), 否则接触参数语义
+          被改错 -> 策略崩坏。见 geom 注释。
+       4. **分辨率不能太高**: MuJoCo 每个 geom-hfield 对最多 50 个接触, 格距
+          太小会截断并刷 "height field collision overflow" (实测 n=384/3.1cm
+          会; n=128/9.4cm 不会)。故 gen_terrain.py 默认 --n 128。
+       5. 地形生成是确定性的 (sim/gen_terrain.py + 固定 seed), 训练与 view
+          载入同一个 PNG -> 严格一致。
+       6. **终止阈值与地形高度耦合**: healthy_z_range=(0.22,0.65) 是躯干**绝对**
+          z; 总高差 0.30m 时站最高台 z≈0.58, 距上界仅 0.07m。若继续加大地形
+          必须同步放宽上界或改用相对足底平面的 z。
+
+       用法:
+         ../.venv/bin/python sim/gen_terrain.py    # 重新生成 + 自动同步 size
+         然后按 (2) 复测 geom 的 pos.z; 按 (6) 检查终止阈值。
+         验证: sim/probe_terrain_recalib.py (标定) + sim/probe_terrain_robust.py
+         (NaN/溢出/v18 基线)。
+  -->
+  <include file="go1_mjx_position.xml"/>
+
+  <statistic center="0 0 0.35" extent="2.2"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="120" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <!-- 地形高度场: 16bit 灰度 PNG, 白=高。
+         size = "radius_x radius_y elevation_z base_z" (由 gen_terrain.py 自动同步):
+           radius_xy   = 6      (gen_terrain 的 ext, 半边长)
+           elevation_z = 0.3000 (生成时的 max height, 见 terrain.json)
+           base_z      = 0.0960 (必须为正: MuJoCo 拒绝 0; 几何范围由它撑开)
+         **高度语义 (实测)**: geom 高度范围 = [pos.z, pos.z + elevation_z + base_z]。
+         注意 base_z 不影响地形形状 (形状全在 PNG 里), 只决定几何包围盒大小;
+         真正的对齐靠 geom 的 pos.z 标定 (见 worldbody 注释)。
+
+         **2026-09-14 加大档**: 起伏 0.02->0.05m, 台阶 0.04->0.06m, 新增 2 条
+         5 级真爬升阶梯 (旧代码的"三阶小楼梯"实为等高平台, 不爬升 —— 已在
+         gen_terrain.add_staircase 修正)。总高差 0.30m = 旧版的 3.7 倍。
+         重标结果: 原点 pos.z=0 仍对齐 (Δ=+0.2mm), 最大坡度 29.8°,
+         ncon 峰值 11 (njmax=256, 无溢出), warp 无 NaN。
+
+         **已知未修问题**: `feet_height` 奖励用足端**世界 z** 对固定目标
+         0.08m 结算; 地形高达 0.30m 后, 高度 >= 0.08m 处 (占地形 73% 的
+         高度范围) 拖地惩罚几乎归零 -> 策略会学"在高处拖地"。修法见
+         实验记录 §16.6.4 (改用相对足下地形高度)。训练前必须处理。 -->
+    <hfield name="terrain" file="terrain.png" size="6 6 0.3000 0.0960"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <!-- 地形地板: 名字保持 "floor" (足端接触传感器依赖), 见文件头约束 1。
+         **pos.z 是标定值, 不能推导**: 方法是扫描 pos.z 使 home keyframe 的
+         沉降高度与平地场景一致 (平地 0.2777m)。实测: elevation_z=0.0807 与
+         0.3000 两档下 pos.z=0 都对齐 (Δ=+0.2mm)。原因是 gen_terrain 的
+         flatten_origin 保证原点 h(0,0)=0, 而 reset 正落在原点 —— 所以只要
+         原点被抹平, pos.z 天然对齐; 若以后去掉 flatten_origin 就必须重标。
+         换地形后仍需复测 (本文件注释保留此检查项)。
+         **priority 必须为 0 (与平地 floor 一致)**:
+         MuJoCo 接触参数规则 —— 两侧 priority 不同取**高**的一方; 相同且非 0
+         取两者"最大值"。平地 floor=0 / 足端=1 -> 足端参数 (condim=6,
+         friction 0.6, 硬接触 solimp) 生效, 这是 v18 训练语义。若这里写
+         priority=1 则两侧同级 -> 摩擦/condim/solimp 全变 (实测 condim 3、
+         friction 1.0), 足端抓地被改 -> 策略崩坏 (曾实测到, 非泛化问题)。 -->
+    <geom name="floor" type="hfield" hfield="terrain" material="groundplane"
+      pos="0 0 0" friction="1.0 0.02 0.01"/>
+  </worldbody>
+</mujoco>

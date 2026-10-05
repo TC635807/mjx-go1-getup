@@ -1,0 +1,23 @@
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# --- training artefacts (regenerable) ---
+logs/
+*.log
+events.out.tfevents.*
+*.npz
+*.npy
+*.mp4
+*.gif
+
+# --- editors / os ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

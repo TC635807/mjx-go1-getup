@@ -1,62 +1,49 @@
-[English](README.en.md) | **简体中文**
+[English](README.en.md) | 简体中文
 
 # MJX Go1 Get-Up
 
-**基于 MJX（MuJoCo Warp）+ Brax PPO 的 Unitree Go1 地形行走与学习式摔倒起身** —— 在**单张 8 GB
-笔记本 GPU** 上端到端训练。不用 Isaac，不用集群，不用动捕参考。
-
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![JAX](https://img.shields.io/badge/JAX-0.7.2-9B30FF)
-![MuJoCo MJX](https://img.shields.io/badge/MuJoCo%20MJX-3.12-1f6feb)
-![Brax](https://img.shields.io/badge/Brax-0.14.2-orange)
-![License](https://img.shields.io/badge/license-MIT-green)
+Unitree Go1 的行走与起身策略。物理用 MJX（MuJoCo Warp），训练用 Brax PPO，全流程在一张
+RTX 5060 Laptop（8 GB）上跑通。
 
 ![走路策略在程序化地形上](docs/assets/walk-terrain.png)
 
----
-
 ## 仓库内容
 
-三个部分，跑的是**同一个** MuJoCo 模型、50 Hz、全部在 MJX 上：
+三个部分跑的是同一个 MuJoCo 模型，控制频率 50 Hz：
 
-| 组件 | 做什么 | 观测 | 动作语义 |
-|---|---|---|---|
-| **走路策略** — [`envs/go1_walk.py`](envs/go1_walk.py) | 速度跟踪 trot，跑在程序化高度场地形上（起伏、台地、两条楼梯） | 91 维 | 12 个绝对关节位置目标 |
-| **起身策略** — [`envs/go1_getup_v2.py`](envs/go1_getup_v2.py) | 从**任意摔倒姿态**站起，包括走路策略"真摔倒"后实际落在的那些姿态 | 5 × 42 = 210 维（历史帧） | 锚定式：`target = home_pose + 0.5·clip(a, ±8)` |
-| **调度器 / 查看器** — [`sim/view_go1.py`](sim/view_go1.py) | 去抖摔倒检测 → 交给起身策略 → 站住后交还走路策略 | — | — |
-
-重点不是"策略能站起来"，而是**整条链路都被离线探针量化过**：摔倒多久被检出、起身成功几次、
-花了多久，以及控制权交还给走路策略之后的**那两秒**会发生什么。
+- **走路策略** `envs/go1_walk.py`：速度跟踪 trot。地形是程序生成的 hfield，包含起伏、台地和
+  两条楼梯。观测 91 维，动作是 12 个绝对关节位置目标。
+- **起身策略** `envs/go1_getup_v2.py`：从摔倒姿态站起。观测是 5 帧 × 42 维的历史，
+  动作是 `target = home_pose + 0.5 * clip(a, ±8)`。
+- **调度器** `sim/view_go1.py`：检测到摔倒后切到起身策略，站起来保持 0.5 s 再把控制权交回
+  走路策略。
 
 ## 结果
 
-下表中每个数字都能用本仓库的脚本复现（命令见"快速开始"），原始开发日志在
-[`docs/experiment-log.md`](docs/experiment-log.md)。
-
-| 指标 | 数值 | 测法 |
+| 指标 | 数值 | 复现脚本 |
 |---|---|---|
-| **走路真摔倒 → 起身成功率** | **77.3 %**（严格）/ **81.2 %**（容错），n = 128 | [`sim/probe_handover.py`](sim/probe_handover.py) `--stage realfall` |
-| 到站耗时 | 5.71 s → **4.89 s**（容错判据） | 同上 |
-| 交还瞬间的摔倒率 | **7.9 %**；10 帧动作混合 38.3 %、30 帧 73.6 % | `--stage cycle`，227 个起身终态 |
-| 走路策略（60 M 步） | best `eval_reward` 2339.7，平均 episode 670 / 750 步（13.4 s），30 s 长测 0 摔 | [`train/train_go1.py`](train/train_go1.py) eval |
-| 台阶 | 下台阶 62–87 %，**上台阶 0 %** —— 未解决 | [`sim/eval_stairs.py`](sim/eval_stairs.py) |
-| 训练吞吐 | 起身 **22–25 k 步/s**（40 M ≈ 30 分钟）；走路 ≈ 4.4 k 步/s（60 M ≈ 4 小时） | RTX 5060 Laptop 8 GB, WSL2 |
+| 走路真摔倒后的起身成功率 | 77.3%（严格）/ 81.2%（容错），n = 128 | `sim/probe_handover.py --stage realfall` |
+| 到站时间 | 5.71 s → 4.89 s（容错判据） | 同上 |
+| 交还后的摔倒率 | 7.9%（10 帧动作混合 38.3%，30 帧 73.6%） | `sim/probe_handover.py --stage cycle` |
+| 走路策略（60M 步） | eval_reward 2339.7，平均 episode 670/750 步 | `train/train_go1.py` 的训练日志 |
+| 台阶 | 下台阶 62~87%，上台阶 0% | `sim/eval_stairs.py` |
+| 训练速度 | 起身 22k~25k 步/s（40M 步约 30 分钟）；走路约 4.4k 步/s | RTX 5060 Laptop 8 GB |
 
-### 三条花了最久才接受的结论
+这些数字都是在上面几个脚本里跑出来的，命令见「使用方法」。起身的判据定义（`up_z` 阈值、
+连续多少帧算站住）在 `docs/status.md`，换个阈值数字会差很多，看数之前先确认口径。
 
-1. **瓶颈是判据，不是姿态。** 起身策略其实相当可靠地到达了站姿（高度带内最好的 `up_z` 中位数
-   0.999），真正卡住的是旧判据"必须**连续** 25 帧满足"。把计数器改成容错（满足 +1 / 不满足 −1，
-   而不是清零）后，成功率 77.3 % → 81.2 %，到站时间少 0.8 s。**`up_z` 阈值取多少会让结论差一个
-   数量级**（0.99 → 倾角 8.1° ≈ 0 %；0.95 → 18.2° ≈ 77 %），定义见
-   [`docs/status.md`](docs/status.md) §3。
-2. **把两个策略的动作做混合是有害的。** 起身策略是靠**顶着动作裁剪**站住的（median |a| = 8.0 =
-   clip）。把它的末态目标线性混合进走路策略的目标、持续 10~30 帧，等于先把人推倒：摔倒率
-   7.9 % → 38.3 %（10 帧）→ 73.6 %（30 帧）。**硬切换**才对。
-3. **动作空间锚定比奖励塑形更关键。** 起身任务最大的一次跃迁，是把 `target = qpos + 0.5·a`
-   （无界，策略要从零学关节角本身）换成 `target = home_pose + 0.5·clip(a, ±8)` —— 也就是开源项目
-   [get-up-isaaclab](https://github.com/iit-DLSLab/get-up-isaaclab) 的配方；再配上**只有两个宽高斯**
-   的奖励和**完全不做姿态终止**，任务才从 0 % 走到 ~80 %。与公开实现（HoST、HumanUP、AFR…）的
-   逐条对照见 [`docs/getup-recipes.md`](docs/getup-recipes.md)。
+## 几点经验
+
+- **起身成功率主要取决于判据，不是策略。** 策略基本都能站到位（高度带内最好的 `up_z` 中位数
+  0.999），卡住的是「必须连续 25 帧满足」。把计数器改成满足加一、不满足减一之后，成功率
+  77.3% → 81.2%，到站时间少 0.8 s。另外 `up_z` 取 0.99（倾角 8.1°）还是 0.95（18.2°），
+  成功率差一个数量级。
+- **交还时不要混合两个策略的动作。** 起身策略是靠顶住动作上限站住的，`|a|` 的中位数正好等于
+  裁剪值 8.0。把它的末态目标和走路策略的目标按比例混合，前 10 帧摔倒率就升到 38.3%，30 帧
+  升到 73.6%；直接切换是 7.9%。
+- **动作空间用锚定式比增量式好训。** 增量式 `target = qpos + 0.5 * a` 要求策略自己学关节角，
+  换成 `target = home_pose + 0.5 * clip(a, ±8)`（get-up-isaaclab 的写法），配上两个宽高斯奖励、
+  不做姿态终止，这个任务才从 0% 做到 80% 左右。
 
 ## 安装
 
@@ -67,14 +54,13 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-验证环境：Python 3.14、JAX 0.7.2、MuJoCo 3.12、Brax 0.14.2、`warp-lang` 1.16，RTX 5060 Laptop
-（8 GB）、WSL2。训练需要 CUDA-12 GPU；查看器强烈建议也用 GPU。几个必须注意的环境变量
-（`XLA_PYTHON_CLIENT_MEM_FRACTION`、`LP_NUM_THREADS`、`GALLIUM_DRIVER`）和我们踩过的所有
-WSL 渲染坑，都写在 [`docs/viewer-guide.md`](docs/viewer-guide.md) 里。
+开发环境是 Python 3.14 + JAX 0.7.2 + MuJoCo 3.12 + Brax 0.14.2 + warp-lang 1.16，训练需要
+CUDA 12 的 GPU。几个环境变量（`XLA_PYTHON_CLIENT_MEM_FRACTION`、`LP_NUM_THREADS`、
+`GALLIUM_DRIVER`）和 WSL 下的渲染问题写在 `docs/viewer-guide.md`。
 
-## 快速开始
+## 使用方法
 
-**1. 看它走路、摔倒、再爬起来**（交互式 MuJoCo 查看器）：
+### 查看器
 
 ```bash
 python sim/view_go1.py \
@@ -83,11 +69,10 @@ python sim/view_go1.py \
     --getup_obs history --getup_action anchored --cmd 0
 ```
 
-`W/S` 调前进速度指令，`A/D` 转向，`R` 重置，`Q` 退出。`--cmd 0` 时机器人原地不动，是看起身
-最干净的方式；默认的 `--cmd 0.5` 会在 8~16 s 内走出 6 m 地形边缘（出界会被重置，而不是在半空
-乱蹬）。
+W/S 调前进速度，A/D 转向，R 重置，Q 退出。`--cmd 0` 时机器人原地走，看起身最清楚；默认的
+`--cmd 0.5` 会在 8~16 s 内走到地形边缘（出界会重置，不会在半空触发起身）。
 
-**2. 离线评估起身成功率**（不渲染，256 个并行环境）：
+### 评估起身
 
 ```bash
 python sim/eval_getup.py --task getup_v2 --getup2_action_clip 8.0 \
@@ -95,95 +80,94 @@ python sim/eval_getup.py --task getup_v2 --getup2_action_clip 8.0 \
     --pkl policies/go1_getup_policy.pkl --envs 256 --steps 400
 ```
 
-> ⚠️ `--getup2_action_clip` **必须与训练一致**（8.0）。用配置默认值（3.0）去评估发布策略会把动作
-> 夹掉，评出假的 0 %。
+> [!WARNING]
+> `--getup2_action_clip` 必须和训练时一致（8.0）。用配置默认值 3.0 会把动作夹掉，
+> 评出来的成功率是假的 0%。
 
-**3. 复现头条数字** —— 一直走到真摔倒，再交给起身策略：
+### 复现起身成功率
 
 ```bash
 python sim/probe_handover.py --stage realfall --envs 128 --steps 1500 \
     --getup_steps 600 --cmd 0.5 --bound_xy 5.0
 ```
 
-**4. 从零训练**：
+### 训练
 
 ```bash
-# 起身策略：40 M 步，RTX 5060 Laptop 上约 30 分钟
+# 起身策略：40M 步，RTX 5060 Laptop 上约 30 分钟
 python -u -m train.train_getup --task getup_v2 --action_clip 8.0 \
     --num_timesteps 40000000 --num_evals 16 --episode_length 400 \
     --num_minibatches 4 --updates_per_batch 5 --lr 5e-4 --entropy 0.005 --init_noise_std 1.0
 
-# 走路策略：60 M 步
+# 走路策略：60M 步
 python -u -m train.train_go1 --num_timesteps 60000000
 ```
 
-检查点写到 `logs/`，策略写到 `policies/`。两个不花 GPU 时间的自检：
-`python -m train.train_getup --dry_run`（只建环境 + 建网络）和 `python sim/probe_getup_v2.py`
-（起身环境自检 —— 改起身环境之前先跑它）。
+检查点存在 `logs/`，策略存在 `policies/`。改代码之前可以先跑两个自检：
+`python -m train.train_getup --dry_run`（只建环境和网络）和 `python sim/probe_getup_v2.py`
+（起身环境自检）。
 
-## 目录结构
+## 目录
 
 ```
 mjx-go1-getup/
 ├── envs/                     # MJX 环境（物理 + 任务定义）
-│   ├── go1_walk.py           #   走路：地形、奖励、终止、91 维 obs
+│   ├── go1_walk.py           #   走路：地形、奖励、终止、91 维观测
 │   ├── go1_getup.py          #   起身 v1：增量动作（保留作对照）
 │   ├── go1_getup_residual.py #   起身：关键帧状态机 + 学习残差
-│   └── go1_getup_v2.py       #   * 起身 v2：锚定动作 + 宽高斯 + 历史帧
+│   └── go1_getup_v2.py       #   起身 v2：锚定动作 + 宽高斯 + 历史帧
 ├── train/
 │   ├── train_go1.py          # 走路训练（brax PPO）
 │   └── train_getup.py        # 起身训练：--task getup | getup_res | getup_v2
 ├── sim/
-│   ├── view_go1.py           # * 交互式查看器 + 走路/起身调度器
-│   ├── watch_v20_fast.py     #   高帧率观测脚本（见 docs/viewer-guide.md）
-│   ├── eval_getup.py         #   起身成功率 / 分姿态桶 / 到站时间
-│   ├── eval_walk.py          #   走路评估（固定出生点集，可比）
-│   ├── eval_stairs.py        #   上下台阶成功率（固定摆放）
-│   ├── probe_handover.py     # * 交还瞬间的定量探针
-│   ├── probe_getup_v2.py     #   起身 v2 环境自检
-│   ├── probe_standability.py #   判据本身到底可不可达？
-│   ├── probe_nefc.py         #   接触约束溢出探针（见"已知问题"）
-│   ├── gen_terrain.py        #   确定性地形生成器（hfield PNG + json）
-│   ├── getup_keyframe.py     #   脚本化关键帧起身（基线 + 查看器兜底）
-│   └── common.py             #   共用的策略加载（pkl / orbax checkpoint）
+│   ├── view_go1.py           # 交互式查看器 + 走路/起身调度器
+│   ├── watch_v20_fast.py     # 高帧率观测脚本
+│   ├── eval_getup.py         # 起身成功率 / 分姿态桶 / 到站时间
+│   ├── eval_walk.py          # 走路评估（固定出生点集）
+│   ├── eval_stairs.py        # 上下台阶成功率
+│   ├── probe_handover.py     # 交还瞬间的定量探针
+│   ├── probe_getup_v2.py     # 起身环境自检
+│   ├── probe_standability.py # 判据本身可不可达
+│   ├── probe_nefc.py         # 接触约束溢出探针
+│   ├── gen_terrain.py        # 地形生成器（hfield PNG + json）
+│   ├── getup_keyframe.py     # 脚本化关键帧起身（基线 + 查看器兜底）
+│   └── common.py             # 策略加载（pkl / orbax checkpoint）
 ├── models/go1/               # MuJoCo 模型（MJCF + 网格 + 地形）
-├── policies/                 # 发布策略（走路 v23@60M、起身 v2f）
+├── policies/                 # 两个策略：走路 v23@60M、起身 v2f
 └── docs/                     # 实验记录、状态、查看器指南、起身配方调研
 ```
 
 ## 文档
 
-| 文档 | 内容 |
-|---|---|
-| [`docs/status.md`](docs/status.md) | **先读这个** —— 当前结果，以及所有判据（摔倒检测、站住、交还）的精确定义 |
-| [`docs/experiment-log.md`](docs/experiment-log.md) | 完整开发日志（§1–§29.28）：每一次失败尝试，和否掉它的那个实测数字 |
-| [`docs/getup-recipes.md`](docs/getup-recipes.md) | 与开源起身实现逐条对照（get-up-isaaclab、HoST、HumanUP、AFR）+ SOTA 调研 |
-| [`docs/viewer-guide.md`](docs/viewer-guide.md) | 怎么写一个快的 MJX 查看器：逐帧耗时拆解、JIT 陷阱、WSL 渲染 |
+- `docs/status.md`：当前结果，以及各判据的精确定义（建议先看这个）
+- `docs/experiment-log.md`：开发记录，按时间顺序写，包含失败的尝试
+- `docs/getup-recipes.md`：公开起身实现的配方对照和 SOTA 调研
+- `docs/viewer-guide.md`：MJX 查看器的逐帧耗时拆解和常见坑
 
-代码、docstring 与本文档均以中文为主，英文版概览见 [README.en.md](README.en.md)。
+英文版概览见 [README.en.md](README.en.md)。
 
-## 已知问题与路线图
+## 已知问题
 
-* **`njmax=256` 对起身任务太小。** 在高度场地形上摔倒时单个 world 实测需要 `nefc ≈ 1300`，
-  训练中会打 `nefc overflow` 告警（719 次 / 384 k world-帧）。用 `njmax=2048` 重训一版是待办
-  —— 它不解释观察到的抽搐，但会影响"躺在地上"时的接触精度。可用
-  [`sim/probe_nefc.py`](sim/probe_nefc.py) 复现。
-* **起身策略是"顶着动作裁剪"站住的**（median |action| = 8.0 = clip，关节还在 11.5 rad/s 上动）。
-  奖励里加一项"站住时要安静"、或者让成功奖金要求姿态静止，是下一步的质量提升。
-* **训推分布差 ~11 个点**：训练出生姿态 88.7 % vs 走路真摔倒 77.3 %。计划用真摔倒姿态池做微调
-  （[`sim/make_getup_posepool.py`](sim/make_getup_posepool.py)）。
-* **上台阶未解决**（固定楼梯上 0 % 成功率），走路策略的镜像对称性也不完美（hip RR/RL 偏差 ≈ 16°）。
+- `njmax=256` 对起身任务偏小。摔倒时单个 world 实测需要约 1300 个约束，训练日志里会出现
+  `nefc overflow` 告警（719 次 / 384k world-帧）。用 `njmax=2048` 重训一版是待办，可以用
+  `sim/probe_nefc.py` 复现。这不解释观察到的抽搐，但会影响躺地时的接触精度。
+- 起身策略是靠顶住动作裁剪站住的（`|action|` 中位数 8.0 = clip，关节速度还有 11.5 rad/s）。
+  奖励里加一项「站住时要安静」，或者让成功奖金要求姿态静止，是下一步。
+- 训练出生姿态 88.7% 对走路真摔倒 77.3%，差 11 个点。计划用真摔倒姿态池微调
+  （`sim/make_getup_posepool.py`）。
+- 上台阶没做出来（固定楼梯上 0%），走路策略的镜像对称性也不完美（hip RR/RL 偏差约 16°）。
 
 ## 致谢
 
-* [MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground) 与
-  [Brax](https://github.com/google/brax) —— 本项目的训练栈（环境 API、PPO、MJX/warp 后端）。
-* [get-up-isaaclab](https://github.com/iit-DLSLab/get-up-isaaclab)（IIT-DLSLab）—— `go1_getup_v2.py`
-  逐条照抄的起身配方；[HoST](https://github.com/InternRobotics/HoST) 与
-  [HumanUP](https://github.com/RunpeiDong/HumanUP) —— 多 critic / 两阶段课程，影响了本项目的路线图。
-* [quadruped-rl-locomotion](https://github.com/nimazareian/quadruped-rl-locomotion) —— 走路任务复刻自此
-  仓库，之后移植到 MJX。
-* Unitree Go1 的 MJCF 来自 [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)。
+- [MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground)、
+  [Brax](https://github.com/google/brax)：本项目的训练栈
+- [get-up-isaaclab](https://github.com/iit-DLSLab/get-up-isaaclab)（IIT-DLSLab）：
+  `envs/go1_getup_v2.py` 的配方来自这里
+- [HoST](https://github.com/InternRobotics/HoST)、
+  [HumanUP](https://github.com/RunpeiDong/HumanUP)：多 critic 和两阶段课程
+- [quadruped-rl-locomotion](https://github.com/nimazareian/quadruped-rl-locomotion)：
+  走路任务是从这个仓库复刻过来的
+- [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)：Go1 的 MJCF
 
 ## License
 

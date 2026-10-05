@@ -1,15 +1,14 @@
-# 起身 (get-up) 配方调研 — 公开实现与 SOTA 对照
+# 起身（get-up）配方调研
 
-> 本文件合并了两份调研笔记：《别人怎么做"四足/人形起身"》(开源实现配方逐条对照) 与
-> 《四足/人形 RL 起身 SOTA 调研》。所有数字均来自公开仓库源码 / 论文摘要并附出处。
->
-> 调研目的：停止在本项目里"盲试"，先把**公开可复现的配方**抄清楚，再对照本项目的差异。
-> 本项目据此重写了 [envs/go1_getup_v2.py](../envs/go1_getup_v2.py)，把起身成功率从 0%
-> 做到 77~81%（见 [status.md](status.md)）。
+两份调研笔记的合并：一份逐条对照公开的开源实现（get-up-isaaclab、HoST、HumanUP、AFR 等），
+一份汇总各家的成功率、起点分布和课程设计。数字都来自仓库源码或论文摘要，附了出处。
+
+调研的目的是先弄清公开工作怎么做，再对照本项目改。envs/go1_getup_v2.py 就是按
+get-up-isaaclab 的配方重写的，起身成功率从 0% 做到 77~81%（见 status.md）。
 
 ---
 
-## 第一部分：开源实现配方对照 (get-up-isaaclab / HoST / HumanUP / AFR)
+## 一、开源实现配方对照（get-up-isaaclab / HoST / HumanUP / AFR）
 
 # 别人怎么做"四足/人形起身" —— 开源实现与论文配方汇总
 
@@ -216,7 +215,7 @@ Stage 2 "refines the discovered motions into **deployable (smooth and slow)** mo
 
 ---
 
-## 第二部分：SOTA 调研 (成功率、起点分布、课程与判据)
+## 二、SOTA 调研（成功率、起点分布、课程与判据）
 
 # 四足/人形 RL 起身 (getup / fall-recovery) SOTA 调研
 
